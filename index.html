@@ -13,9 +13,16 @@
     #map { height: 380px; width: 100%; border-radius: 0.5rem; }
     .nav-btn.active { background-color: #3b82f6; color: white; }
     .filter-btn.active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
-    .admin-only { display: none; }
+    
+    /* Admin visibility rules */
+    .admin-only { display: none !important; }
     body.is-admin .admin-only { display: block !important; }
     body.is-admin button.admin-only, body.is-admin a.admin-only { display: inline-block !important; }
+    body.is-admin table .admin-only { display: table-cell !important; }
+
+    /* Public view element rules */
+    .public-only { display: block !important; }
+    body.is-admin .public-only { display: none !important; }
   </style>
 </head>
 <body class="bg-slate-100 font-sans text-slate-800 min-h-screen flex flex-col justify-between">
@@ -94,7 +101,7 @@
         </div>
       </section>
 
-      <!-- 3. Breeding Plan Tab -->
+      <!-- 3. Breeding Plan Tab (PUBLIC READ, ADMIN EDIT) -->
       <section id="tab-heat" class="tab-content hidden space-y-6">
         <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-2">
@@ -1001,7 +1008,7 @@
       tbody.innerHTML = '';
 
       if (breedingPlanDams.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-slate-400">No female dogs added to the breeding plan yet. Click "Add Dam/Female to Plan".</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-slate-400">No female dogs added to the breeding plan yet.</td></tr>`;
         return;
       }
 
@@ -1024,25 +1031,57 @@
         tr.className = "hover:bg-slate-50";
         tr.innerHTML = `
           <td class="p-1.5 font-semibold text-slate-800">${renderParentLink(item.name)}</td>
-          <td class="p-1.5"><input type="date" value="${item.lastHeat || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'lastHeat', this.value)" class="border rounded px-1 py-0.5 text-[11px]"></td>
-          <td class="p-1.5"><input type="date" value="${item.matingDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matingDate', this.value)" class="border rounded px-1 py-0.5 text-[11px]"></td>
-          <td class="p-1.5"><input type="text" list="sire-list" value="${item.matedSire || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matedSire', this.value)" placeholder="Sire..." class="border rounded px-1 py-0.5 text-[11px] w-24"></td>
-          <td class="p-1.5 font-bold text-blue-600">${estDue}</td>
+          
+          <!-- Last Heat -->
           <td class="p-1.5">
-            <select onchange="updateBreedingPlanField('${item.dogId}', 'gaveBirth', this.value)" class="border rounded px-1 py-0.5 text-[11px]">
+            <input type="date" value="${item.lastHeat || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'lastHeat', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.lastHeat)}</span>
+          </td>
+
+          <!-- Mating Date -->
+          <td class="p-1.5">
+            <input type="date" value="${item.matingDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matingDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.matingDate)}</span>
+          </td>
+
+          <!-- Mated Sire -->
+          <td class="p-1.5">
+            <input type="text" list="sire-list" value="${item.matedSire || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matedSire', this.value)" placeholder="Sire..." class="admin-only border rounded px-1 py-0.5 text-[11px] w-24">
+            <span class="public-only">${item.matedSire ? renderParentLink(item.matedSire) : 'N/A'}</span>
+          </td>
+
+          <!-- Est. Due -->
+          <td class="p-1.5 font-bold text-blue-600">${estDue}</td>
+
+          <!-- Gave Birth? -->
+          <td class="p-1.5">
+            <select onchange="updateBreedingPlanField('${item.dogId}', 'gaveBirth', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
               <option value="No" ${item.gaveBirth === 'No' ? 'selected' : ''}>No</option>
               <option value="Yes" ${item.gaveBirth === 'Yes' ? 'selected' : ''}>Yes</option>
             </select>
+            <span class="public-only">${item.gaveBirth || 'No'}</span>
           </td>
-          <td class="p-1.5"><input type="date" value="${item.birthDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'birthDate', this.value)" class="border rounded px-1 py-0.5 text-[11px]"></td>
-          <td class="p-1.5 font-bold text-amber-600">${estNextHeat}</td>
+
+          <!-- Birth Date -->
           <td class="p-1.5">
-            <select onchange="updateBreedingPlanField('${item.dogId}', 'nextBreeding', this.value)" class="border rounded px-1 py-0.5 text-[11px]">
+            <input type="date" value="${item.birthDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'birthDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.birthDate)}</span>
+          </td>
+
+          <!-- Est Next Heat -->
+          <td class="p-1.5 font-bold text-amber-600">${estNextHeat}</td>
+
+          <!-- Next Breeding -->
+          <td class="p-1.5">
+            <select onchange="updateBreedingPlanField('${item.dogId}', 'nextBreeding', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
               <option value="Skip Heat" ${item.nextBreeding === 'Skip Heat' ? 'selected' : ''}>Skip Heat</option>
               <option value="Breed" ${item.nextBreeding === 'Breed' ? 'selected' : ''}>Breed</option>
               <option value="Rest/Retired" ${item.nextBreeding === 'Rest/Retired' ? 'selected' : ''}>Rest/Retired</option>
             </select>
+            <span class="public-only font-medium">${item.nextBreeding || 'Skip Heat'}</span>
           </td>
+
+          <!-- Action -->
           <td class="p-1.5 text-center admin-only">
             <button onclick="deleteBreedingPlanDam('${item.dogId}')" class="text-red-500 hover:text-red-700 font-bold">✕</button>
           </td>
@@ -1159,6 +1198,7 @@
         document.body.classList.remove('is-admin');
         if (authBtn) authBtn.innerText = 'Login as Admin';
       }
+      render(); // Re-render all sections to toggle admin UI controls
     });
 
     window.toggleAuth = function() {
