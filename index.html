@@ -1,769 +1,1218 @@
-// --- Data Initializations & Global Variables ---
-const stateCoords = {
-  "Kuala Lumpur": [3.1390, 101.6869],
-  "Selangor": [3.0738, 101.5183],
-  "Penang": [5.4141, 100.3288],
-  "Johor": [1.4854, 103.7618],
-  "Perak": [4.5921, 101.0901],
-  "Pahang": [3.8126, 103.3256],
-  "Kedah": [6.1184, 100.3685],
-  "Melaka": [2.1896, 102.2501],
-  "Negeri Sembilan": [2.7258, 101.9424],
-  "Kelantan": [6.1254, 102.2381],
-  "Terengganu": [5.3117, 103.1324],
-  "Perlis": [6.4449, 100.2048]
-};
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joyfido Shiba Inu Kennel Pedigree Management</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS & JS (Map Component) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #map { height: 380px; width: 100%; border-radius: 0.5rem; }
+    .nav-btn.active { background-color: #3b82f6; color: white; }
+    .filter-btn.active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
+    
+    /* Admin visibility rules */
+    .admin-only { display: none !important; }
+    body.is-admin .admin-only { display: block !important; }
+    body.is-admin button.admin-only, body.is-admin a.admin-only { display: inline-block !important; }
+    body.is-admin table .admin-only { display: table-cell !important; }
 
-let dogs = JSON.parse(localStorage.getItem('dogs_data')) || [];
-let litters = JSON.parse(localStorage.getItem('litters_data')) || [];
-let breedingPlanDams = JSON.parse(localStorage.getItem('breeding_plan_dams')) || [];
-let currentRoleFilter = 'All';
-let map = null;
-let mapMarkers = [];
+    /* Public view element rules */
+    .public-only { display: block !important; }
+    body.is-admin .public-only { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-800 min-h-screen flex flex-col justify-between">
 
-// --- Date Formatting Helpers ---
-function formatDateToDMY(dateInput) {
-  if (!dateInput) return 'N/A';
-  const parts = dateInput.split('-');
-  if (parts.length === 3) {
-    return `${parts[2]}/${parts[1]}/${parts[0]}`;
-  }
-  return dateInput;
-}
-
-function formatDateObjToDMY(dateObj) {
-  if (!dateObj || isNaN(dateObj.getTime())) return 'N/A';
-  const dd = String(dateObj.getDate()).padStart(2, '0');
-  const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const yyyy = dateObj.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
-
-// --- Persistence & State Management ---
-function saveData() {
-  localStorage.setItem('dogs_data', JSON.stringify(dogs));
-  localStorage.setItem('litters_data', JSON.stringify(litters));
-  localStorage.setItem('breeding_plan_dams', JSON.stringify(breedingPlanDams));
-  render();
-}
-
-function updateFilterCounts() {
-  const roles = ['Sire', 'Dam', 'Available Puppy', 'Pet/Retired', 'Sold Puppy', 'To Be Decide'];
-  
-  const totalCount = dogs.length;
-  const elAll = document.getElementById('count-All');
-  if (elAll) elAll.innerText = totalCount;
-
-  roles.forEach(role => {
-    const count = dogs.filter(d => d.role === role).length;
-    const el = document.getElementById(`count-${role}`);
-    if (el) el.innerText = count;
-  });
-}
-
-function switchTab(tab) {
-  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-  document.getElementById(`tab-${tab}`).classList.remove('hidden');
-  document.getElementById(`btn-${tab}`).classList.add('active');
-  if (tab === 'owners') setTimeout(initMap, 200);
-}
-
-function filterByRole(role) {
-  currentRoleFilter = role;
-  document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-  const activeBtn = document.getElementById(`filter-${role}`);
-  if (activeBtn) activeBtn.classList.add('active');
-  render();
-}
-
-// --- Dynamic Link & Profile Modals ---
-function renderParentLink(name) {
-  if (!name) return 'N/A';
-  return `<a href="javascript:void(0)" onclick="popProfileModal('${name}')" class="text-blue-600 hover:underline font-semibold">${name}</a>`;
-}
-
-function renderLitterLink(litterId) {
-  if (!litterId) return 'None';
-  const litter = litters.find(l => l.id === litterId);
-  if (litter) {
-    return `<a href="javascript:void(0)" onclick="openViewLitterModal('${litter.id}')" class="text-blue-600 hover:underline font-semibold">📋 ${litter.code}</a>`;
-  }
-  return 'None';
-}
-
-function getOffspringForDog(dogName) {
-  if (!dogName) return [];
-  const cleanName = dogName.trim().toLowerCase();
-  const offspringList = [];
-
-  dogs.forEach(d => {
-    if ((d.father && d.father.trim().toLowerCase() === cleanName) || 
-        (d.mother && d.mother.trim().toLowerCase() === cleanName)) {
-      if (!offspringList.some(o => o.name.toLowerCase() === d.name.toLowerCase())) {
-        offspringList.push({ name: d.name, gender: d.gender, colour: d.colour });
-      }
-    }
-  });
-
-  litters.forEach(l => {
-    if ((l.father && l.father.trim().toLowerCase() === cleanName) || 
-        (l.mother && l.mother.trim().toLowerCase() === cleanName)) {
-      if (l.puppies && l.puppies.length > 0) {
-        l.puppies.forEach(p => {
-          if (p.name && !offspringList.some(o => o.name.toLowerCase() === p.name.trim().toLowerCase())) {
-            offspringList.push({ name: p.name.trim(), gender: p.gender, colour: p.colour });
-          }
-        });
-      }
-    }
-  });
-
-  return offspringList;
-}
-
-function renderOffspringLinks(dogName) {
-  const offspring = getOffspringForDog(dogName);
-  if (offspring.length === 0) {
-    return '<span class="text-slate-400 text-xs">No offspring recorded</span>';
-  }
-  return offspring.map(o => `
-    <span class="inline-block bg-blue-50 border border-blue-200 text-blue-800 px-2 py-0.5 rounded text-[11px] font-medium mr-1 mb-1">
-      ${renderParentLink(o.name)} <span class="text-slate-400">(${o.gender} · ${o.colour || 'Red'})</span>
-    </span>
-  `).join('');
-}
-
-function openViewLitterModal(litterId) {
-  const litter = litters.find(l => l.id === litterId);
-  if (!litter) return;
-
-  const associatedPuppies = dogs.filter(d => d.litterId === litter.id);
-  let puppiesHtml = '';
-
-  if (litter.puppies && litter.puppies.length > 0) {
-    puppiesHtml = litter.puppies.map(p => `
-      <span class="inline-block bg-slate-100 border border-slate-200 text-slate-800 px-2 py-1 rounded text-xs mr-1 mb-1">
-        ${p.name ? renderParentLink(p.name) : 'Unnamed'} <span class="text-slate-400">(${p.gender} · ${p.colour})</span>
-      </span>
-    `).join('');
-  } else if (associatedPuppies.length > 0) {
-    puppiesHtml = associatedPuppies.map(p => `
-      <span class="inline-block bg-slate-100 border border-slate-200 text-slate-800 px-2 py-1 rounded text-xs mr-1 mb-1">
-        ${renderParentLink(p.name)} <span class="text-slate-400">(${p.gender} · ${p.colour || 'Red'})</span>
-      </span>
-    `).join('');
-  } else {
-    puppiesHtml = '<p class="text-slate-400 text-xs">No puppies recorded</p>';
-  }
-
-  const container = document.getElementById('view-litter-content');
-  container.innerHTML = `
-    <div class="border-b pb-3">
-      <span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">Litter Details View</span>
-      <h3 class="text-2xl font-bold text-slate-800">${litter.code}</h3>
-      <p class="text-xs text-slate-500">Date of Birth: ${formatDateToDMY(litter.date)}</p>
-    </div>
-
-    <div class="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-3 rounded-lg border">
-      <div>
-        <p class="text-slate-500 font-medium">Sire (Father)</p>
-        <p class="text-sm font-bold">${renderParentLink(litter.father)}</p>
-      </div>
-      <div>
-        <p class="text-slate-500 font-medium">Dam (Mother)</p>
-        <p class="text-sm font-bold">${renderParentLink(litter.mother)}</p>
-      </div>
-    </div>
-
-    <div class="text-xs text-slate-600">
-      <p class="font-semibold text-slate-700 mb-2">Offspring (${litter.offspringNum || (litter.puppies ? litter.puppies.length : 0)}):</p>
-      <div>${puppiesHtml}</div>
-    </div>
-  `;
-
-  document.getElementById('view-litter-modal').classList.remove('hidden');
-}
-
-function closeViewLitterModal() {
-  document.getElementById('view-litter-modal').classList.add('hidden');
-}
-
-function popProfileModal(dogName) {
-  const targetDog = dogs.find(d => d.name.trim().toLowerCase() === dogName.trim().toLowerCase());
-  if (!targetDog) {
-    alert(`Profile for "${dogName}" was manually entered and is not registered in the system database.`);
-    return;
-  }
-
-  const container = document.getElementById('view-profile-content');
-  
-  container.innerHTML = `
-    <div class="space-y-3">
-      <img src="${targetDog.photo || 'https://via.placeholder.com/300?text=No+Photo'}" class="w-full aspect-square object-cover rounded-lg">
-      <div class="flex justify-between items-start">
-        <div>
-          <h3 class="text-xl font-bold text-slate-800">${targetDog.name}</h3>
-          <p class="text-xs text-slate-500">D.o.B: ${formatDateToDMY(targetDog.dob)}</p>
+  <div>
+    <!-- Top Navigation -->
+    <header class="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-50">
+      <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
+        <div class="flex items-center gap-3">
+          <img id="kennel-logo" src="https://via.placeholder.com/50?text=LOGO" alt="Joyfido Logo" class="w-10 h-10 rounded-full border border-blue-400 object-cover">
+          <h1 class="text-xl font-bold tracking-wide flex items-center gap-2">
+            Joyfido Shiba Inu Kennel Pedigree Management
+          </h1>
         </div>
-        <span class="px-2 py-0.5 text-xs rounded-full font-medium ${targetDog.gender === 'Male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}">${targetDog.gender} · ${targetDog.role}</span>
+        <div class="flex items-center gap-3">
+          <nav class="flex gap-2 bg-slate-800 p-1 rounded-lg flex-wrap">
+            <button onclick="switchTab('dogs')" id="btn-dogs" class="nav-btn active px-4 py-1.5 rounded-md text-sm font-medium transition">Dog Records</button>
+            <button onclick="switchTab('litters')" id="btn-litters" class="nav-btn px-4 py-1.5 rounded-md text-sm font-medium transition">Litters</button>
+            <button onclick="switchTab('heat')" id="btn-heat" class="nav-btn px-4 py-1.5 rounded-md text-sm font-medium transition">Breeding Plan</button>
+            <button onclick="switchTab('owners')" id="btn-owners" class="nav-btn px-4 py-1.5 rounded-md text-sm font-medium transition">Owners Map</button>
+          </nav>
+          <button id="auth-btn" onclick="toggleAuth()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Login as Admin</button>
+        </div>
       </div>
+    </header>
 
-      <div class="flex flex-wrap gap-1 text-xs">
-        <span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">🎨 ${targetDog.colour || 'Red'}</span>
-        <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">🌐 Born: ${targetDog.country || 'N/A'}</span>
-        <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">📍 Loc: ${targetDog.location || 'N/A'}</span>
+    <main class="max-w-7xl mx-auto p-4 md:p-6">
+
+      <!-- 1. Dog Records Tab -->
+      <section id="tab-dogs" class="tab-content space-y-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h2 class="text-xl font-bold text-slate-800">All Dog Profiles</h2>
+          <button onclick="openDogModal()" class="admin-only bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow">+ Add New Dog</button>
+        </div>
+
+        <!-- Role / Status Filter Bar with Counts -->
+        <div class="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
+          <span class="text-xs font-semibold text-slate-500 uppercase self-center mr-2">Filter Status:</span>
+          <button onclick="filterByRole('All')" id="filter-All" class="filter-btn active px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            All <span id="count-All" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+          <button onclick="filterByRole('Sire')" id="filter-Sire" class="filter-btn px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            Sire <span id="count-Sire" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+          <button onclick="filterByRole('Dam')" id="filter-Dam" class="filter-btn px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            Dam <span id="count-Dam" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+          <button onclick="filterByRole('Available Puppy')" id="filter-Available Puppy" class="filter-btn px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            Available Puppy <span id="count-Available Puppy" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+          <button onclick="filterByRole('Pet/Retired')" id="filter-Pet/Retired" class="filter-btn px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            Pet/Retired <span id="count-Pet/Retired" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+          <button onclick="filterByRole('Sold Puppy')" id="filter-Sold Puppy" class="filter-btn px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            Sold Puppy <span id="count-Sold Puppy" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+          <button onclick="filterByRole('To Be Decide')" id="filter-To Be Decide" class="filter-btn px-3 py-1 text-xs font-medium border border-slate-300 rounded-full bg-white transition hover:bg-slate-50">
+            To Be Decide <span id="count-To Be Decide" class="ml-1 px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full text-[10px]">0</span>
+          </button>
+        </div>
+
+        <div id="dogs-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <!-- Dynamic Dog Cards -->
+        </div>
+      </section>
+
+      <!-- 2. Litters Tab -->
+      <section id="tab-litters" class="tab-content hidden space-y-6">
+        <div class="flex justify-between items-center">
+          <h2 class="text-xl font-bold text-slate-800">Litter Records</h2>
+          <button onclick="openLitterModal()" class="admin-only bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow">+ Add New Litter</button>
+        </div>
+
+        <div id="litters-list" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Dynamic Litter Cards -->
+        </div>
+      </section>
+
+      <!-- 3. Breeding Plan Tab (PUBLIC READ, ADMIN EDIT) -->
+      <section id="tab-heat" class="tab-content hidden space-y-6">
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+          <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-2">
+            <h2 class="text-xs md:text-sm font-bold text-slate-800">Breeding Plan & Whelping Tracker</h2>
+            <button onclick="openAddDamToPlanModal()" class="admin-only bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded text-xs font-medium shadow">➕ Add Dam/Female to Plan</button>
+          </div>
+          
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-[11px] whitespace-nowrap">
+              <thead class="bg-slate-50 text-slate-500 uppercase border-b text-[10px]">
+                <tr>
+                  <th class="p-1.5">Dam Name</th>
+                  <th class="p-1.5">Last Heat</th>
+                  <th class="p-1.5">Mating Date</th>
+                  <th class="p-1.5">Mated Sire</th>
+                  <th class="p-1.5">Est. Due (60d)</th>
+                  <th class="p-1.5">Gave Birth?</th>
+                  <th class="p-1.5">Birth Date</th>
+                  <th class="p-1.5">Est. Next Heat</th>
+                  <th class="p-1.5">Next Breeding</th>
+                  <th class="p-1.5 text-center admin-only">Action</th>
+                </tr>
+              </thead>
+              <tbody id="heat-table-body" class="divide-y">
+                <!-- Dynamic Breeding Plan Data -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Owners Map Tab -->
+      <section id="tab-owners" class="tab-content hidden space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+            <h2 class="text-xl font-bold text-slate-800">West Malaysia Statistics</h2>
+            <div id="state-counts" class="space-y-2 max-h-64 overflow-y-auto pr-2">
+              <!-- Dynamic State Statistics -->
+            </div>
+          </div>
+
+          <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+            <h2 class="text-xl font-bold text-slate-800">West Malaysia Distribution Map</h2>
+            <div id="map"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Contact Us Footer Section -->
+  <footer class="bg-slate-900 text-white mt-12 py-6 border-t border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 text-center space-y-3">
+      <h3 class="text-base font-bold text-blue-400 uppercase tracking-wider">Contact Us</h3>
+      <div class="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 text-sm text-slate-300">
+        <p>📱 <span class="font-semibold text-white">Shiba Inu Hubs:</span> 012-2073889</p>
+        <p>📸 <span class="font-semibold text-white">Instagram:</span> chloe.shibainu.malaysia</p>
+        <p>📘 <span class="font-semibold text-white">Facebook:</span> Joyfido Shiba Inu Malaysia</p>
+        <p>📕 <span class="font-semibold text-white">RedNote:</span> 马来西亚柴犬 庄懂事长</p>
       </div>
+      <p class="text-xs text-slate-500 pt-2">© Joyfido Shiba Inu Kennel. All rights reserved.</p>
+    </div>
+  </footer>
 
-      <div class="text-xs text-slate-600 space-y-1.5 border-t pt-2">
-        <p><span class="font-semibold text-slate-700">Sire (Father):</span> ${renderParentLink(targetDog.father)}</p>
-        <p><span class="font-semibold text-slate-700">Dam (Mother):</span> ${renderParentLink(targetDog.mother)}</p>
-        <p><span class="font-semibold text-slate-700">Litter:</span> ${renderLitterLink(targetDog.litterId)}</p>
+  <!-- Add Dam to Breeding Plan Modal -->
+  <div id="add-dam-plan-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 space-y-4">
+      <h3 class="text-lg font-bold text-slate-800">Add Female/Dam to Breeding Plan</h3>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Select Female Dog</label>
+        <select id="select-dam-plan" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          <!-- Dynamic Options -->
+        </select>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" onclick="closeAddDamToPlanModal()" class="px-4 py-2 border rounded-lg text-sm text-slate-600">Cancel</button>
+        <button type="button" onclick="confirmAddDamToPlan()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">Add to Tracker</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Dog Modal -->
+  <div id="dog-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <h3 class="text-lg font-bold text-slate-800" id="dog-modal-title">Add New Dog</h3>
+      <form id="dog-form" onsubmit="saveDog(event)" class="space-y-3">
+        <input type="hidden" id="edit-dog-id">
         
-        <div class="border-t pt-2 mt-2">
-          <p class="font-semibold text-slate-700 mb-1">Offspring / Puppies:</p>
-          <div>${renderOffspringLinks(targetDog.name)}</div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Call Name / Name</label>
+          <input type="text" id="dog-name" required class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
         </div>
 
-        <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded border mt-2">
-          <p><span class="font-semibold text-slate-700">Patella Health:</span><br>${targetDog.patella || 'N/A'}</p>
-          <p><span class="font-semibold text-slate-700">HD Health:</span><br>${targetDog.hd || 'N/A'}</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Gender</label>
+            <select id="dog-gender" class="w-full border rounded-lg p-2 text-sm">
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Role / Status</label>
+            <select id="dog-role" class="w-full border rounded-lg p-2 text-sm">
+              <option value="Sire">Sire</option>
+              <option value="Dam">Dam</option>
+              <option value="Available Puppy">Available Puppy</option>
+              <option value="Pet/Retired">Pet/Retired</option>
+              <option value="Sold Puppy">Sold Puppy</option>
+              <option value="To Be Decide">To Be Decide</option>
+            </select>
+          </div>
         </div>
-        ${targetDog.ownerName ? `<p class="pt-1"><span class="font-semibold text-slate-700">Owner:</span> ${targetDog.ownerName}</p>` : ''}
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Date of Birth (D.o.B)</label>
+            <input type="date" id="dog-dob" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Coat Colour</label>
+            <select id="dog-colour" class="w-full border rounded-lg p-2 text-sm">
+              <option value="Red">Red</option>
+              <option value="Black/Tan">Black/Tan</option>
+              <option value="Cream">Cream</option>
+              <option value="Sesame">Sesame</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Country of Birth</label>
+            <input type="text" id="dog-country" placeholder="e.g. Malaysia, Japan" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Current Location</label>
+            <select id="dog-location" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="">Not Selected</option>
+              <option value="Joyfido Kennel">Joyfido Kennel</option>
+              <option value="Kuala Lumpur">Kuala Lumpur</option>
+              <option value="Selangor">Selangor</option>
+              <option value="Penang">Penang</option>
+              <option value="Johor">Johor</option>
+              <option value="Perak">Perak</option>
+              <option value="Pahang">Pahang</option>
+              <option value="Kedah">Kedah</option>
+              <option value="Melaka">Melaka</option>
+              <option value="Negeri Sembilan">Negeri Sembilan</option>
+              <option value="Kelantan">Kelantan</option>
+              <option value="Terengganu">Terengganu</option>
+              <option value="Perlis">Perlis</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="border-t pt-3">
+          <p class="text-xs font-bold text-slate-500 uppercase mb-2">Health Clearances</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Patella Health</label>
+              <input type="text" id="dog-patella" placeholder="e.g. Grade 0 / Normal" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">HD Health (Hips)</label>
+              <input type="text" id="dog-hd" placeholder="e.g. OFA Good / A1" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 border-t pt-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Sire (Father)</label>
+            <input type="text" id="dog-father" list="sire-list" placeholder="Select or type name..." class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            <datalist id="sire-list"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Dam (Mother)</label>
+            <input type="text" id="dog-mother" list="dam-list" placeholder="Select or type name..." class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            <datalist id="dam-list"></datalist>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Associated Litter</label>
+          <select id="dog-litter" class="w-full border rounded-lg p-2 text-sm"><option value="">None / Not associated</option></select>
+        </div>
+
+        <div class="border-t pt-3 space-y-3">
+          <p class="text-xs font-bold text-slate-500 uppercase">New Owner Details (If applicable)</p>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Owner Name</label>
+            <input type="text" id="owner-name" class="w-full border rounded-lg p-2 text-sm">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Photo</label>
+          <input type="file" id="dog-photo" accept="image/*" class="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+        </div>
+
+        <div class="flex justify-end gap-2 pt-4">
+          <button type="button" onclick="closeDogModal()" class="px-4 py-2 border rounded-lg text-sm text-slate-600">Cancel</button>
+          <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">Save Profile</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- View-Only Litter Modal -->
+  <div id="view-litter-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full overflow-hidden space-y-4">
+      <div id="view-litter-content" class="p-6 space-y-4">
+        <!-- Dynamic View-Only Content -->
+      </div>
+      <div class="p-3 bg-slate-50 border-t flex justify-end">
+        <button onclick="closeViewLitterModal()" class="px-4 py-2 bg-slate-600 text-white rounded-lg text-sm font-medium">Close</button>
       </div>
     </div>
-  `;
+  </div>
 
-  document.getElementById('view-profile-modal').classList.remove('hidden');
-}
+  <!-- Add/Edit Litter Modal -->
+  <div id="litter-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <h3 class="text-lg font-bold text-slate-800" id="litter-modal-title">Add New Litter</h3>
+      <form id="litter-form" onsubmit="saveLitter(event)" class="space-y-3">
+        <input type="hidden" id="edit-litter-id">
 
-function closeProfileModal() {
-  document.getElementById('view-profile-modal').classList.add('hidden');
-}
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Litter ID / Code</label>
+            <input type="text" id="litter-code" placeholder="e.g., 2026-Litter-A" required class="w-full border rounded-lg p-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Offspring Count</label>
+            <input type="number" id="litter-offspring-num" min="1" placeholder="e.g., 4" class="w-full border rounded-lg p-2 text-sm">
+          </div>
+        </div>
 
-// --- Breeding Plan Functions ---
-function openAddDamToPlanModal() {
-  const select = document.getElementById('select-dam-plan');
-  const femaleDogs = dogs.filter(d => d.gender === 'Female' || d.role === 'Dam');
-  
-  if (femaleDogs.length === 0) {
-    alert('No female dogs or Dams found in dog records. Please add female dogs first.');
-    return;
-  }
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Sire (Father)</label>
+            <input type="text" id="litter-father" list="sire-list" placeholder="Select or type..." required class="w-full border rounded-lg p-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Dam (Mother)</label>
+            <input type="text" id="litter-mother" list="dam-list" placeholder="Select or type..." required class="w-full border rounded-lg p-2 text-sm">
+          </div>
+        </div>
 
-  select.innerHTML = femaleDogs.map(d => `<option value="${d.id}">${d.name} (${d.role})</option>`).join('');
-  document.getElementById('add-dam-plan-modal').classList.remove('hidden');
-}
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Date of Birth</label>
+          <input type="date" id="litter-date" required class="w-full border rounded-lg p-2 text-sm">
+        </div>
 
-function closeAddDamToPlanModal() {
-  document.getElementById('add-dam-plan-modal').classList.add('hidden');
-}
+        <!-- Puppy Row Table Builder -->
+        <div class="border-t pt-3">
+          <div class="flex justify-between items-center mb-2">
+            <label class="block text-xs font-bold text-slate-600 uppercase">Puppies / Offspring Details</label>
+            <button type="button" onclick="addPuppyRow()" class="text-xs bg-slate-100 hover:bg-slate-200 text-blue-600 px-2 py-1 rounded font-medium border">+ Add Puppy Row</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-50 border-b text-slate-500">
+                <tr>
+                  <th class="p-1.5">Gender</th>
+                  <th class="p-1.5">Coat Colour</th>
+                  <th class="p-1.5">Link Dog Profile (Name)</th>
+                  <th class="p-1.5 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="litter-puppies-table-body">
+                <!-- Dynamic Rows added here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-function confirmAddDamToPlan() {
-  const selectedId = document.getElementById('select-dam-plan').value;
-  const dog = dogs.find(d => d.id === selectedId);
-  
-  if (!dog) return;
+        <div class="flex justify-end gap-2 pt-4">
+          <button type="button" onclick="closeLitterModal()" class="px-4 py-2 border rounded-lg text-sm text-slate-600">Cancel</button>
+          <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">Save Litter</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
-  if (breedingPlanDams.some(b => b.dogId === dog.id)) {
-    alert(`${dog.name} is already in the breeding plan.`);
-    closeAddDamToPlanModal();
-    return;
-  }
+  <!-- Parent Detail Pop-up Modal -->
+  <div id="view-profile-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden space-y-4">
+      <div id="view-profile-content" class="p-6 space-y-3">
+        <!-- Dynamic Profile Content Pop-up -->
+      </div>
+      <div class="p-3 bg-slate-50 border-t flex justify-end">
+        <button onclick="closeProfileModal()" class="px-4 py-2 bg-slate-600 text-white rounded-lg text-sm font-medium">Close</button>
+      </div>
+    </div>
+  </div>
 
-  breedingPlanDams.push({
-    dogId: dog.id,
-    name: dog.name,
-    lastHeat: '',
-    matingDate: '',
-    matedSire: '',
-    gaveBirth: 'No',
-    birthDate: '',
-    nextBreeding: 'Skip Heat'
-  });
+  <!-- Dog Selection Datalist -->
+  <datalist id="all-dogs-list"></datalist>
 
-  saveData();
-  closeAddDamToPlanModal();
-}
-
-function deleteBreedingPlanDam(dogId) {
-  if (confirm('Remove this female from the breeding plan tracker?')) {
-    breedingPlanDams = breedingPlanDams.filter(b => b.dogId !== dogId);
-    saveData();
-  }
-}
-
-function updateBreedingPlanField(dogId, field, value) {
-  const item = breedingPlanDams.find(b => b.dogId === dogId);
-  if (item) {
-    item[field] = value;
-    saveData();
-  }
-}
-
-// --- Dog CRUD Operations ---
-function openDogModal(dogId = null) {
-  const form = document.getElementById('dog-form');
-  form.reset();
-  document.getElementById('edit-dog-id').value = '';
-  document.getElementById('dog-modal-title').innerText = 'Add New Dog';
-
-  const litterSelect = document.getElementById('dog-litter');
-  litterSelect.innerHTML = '<option value="">None / Not associated</option>' + 
-    litters.map(l => `<option value="${l.id}">${l.code}</option>`).join('');
-
-  if (dogId) {
-    const dog = dogs.find(d => d.id === dogId);
-    if (dog) {
-      document.getElementById('edit-dog-id').value = dog.id;
-      document.getElementById('dog-name').value = dog.name || '';
-      document.getElementById('dog-gender').value = dog.gender || 'Male';
-      document.getElementById('dog-role').value = dog.role || 'Sire';
-      document.getElementById('dog-dob').value = dog.dob || '';
-      document.getElementById('dog-colour').value = dog.colour || 'Red';
-      document.getElementById('dog-country').value = dog.country || '';
-      document.getElementById('dog-location').value = dog.location || '';
-      document.getElementById('dog-patella').value = dog.patella || '';
-      document.getElementById('dog-hd').value = dog.hd || '';
-      document.getElementById('dog-father').value = dog.father || '';
-      document.getElementById('dog-mother').value = dog.mother || '';
-      document.getElementById('dog-litter').value = dog.litterId || '';
-      document.getElementById('owner-name').value = dog.ownerName || '';
-      document.getElementById('dog-modal-title').innerText = 'Edit Dog Profile';
-    }
-  }
-  document.getElementById('dog-modal').classList.remove('hidden');
-}
-
-function closeDogModal() {
-  document.getElementById('dog-modal').classList.add('hidden');
-}
-
-function saveDog(event) {
-  event.preventDefault();
-  const id = document.getElementById('edit-dog-id').value || 'dog_' + Date.now();
-  const name = document.getElementById('dog-name').value;
-  const gender = document.getElementById('dog-gender').value;
-  const role = document.getElementById('dog-role').value;
-  const dob = document.getElementById('dog-dob').value;
-  const colour = document.getElementById('dog-colour').value;
-  const country = document.getElementById('dog-country').value;
-  const location = document.getElementById('dog-location').value;
-  const patella = document.getElementById('dog-patella').value;
-  const hd = document.getElementById('dog-hd').value;
-  const father = document.getElementById('dog-father').value;
-  const mother = document.getElementById('dog-mother').value;
-  const litterId = document.getElementById('dog-litter').value;
-  const ownerName = document.getElementById('owner-name').value;
-  const photoInput = document.getElementById('dog-photo');
-
-  const existingDog = dogs.find(d => d.id === id);
-  let photoUrl = existingDog ? existingDog.photo : '';
-
-  const processSave = (photoData) => {
-    const dogData = {
-      id, name, gender, role, dob, colour, country, location, patella, hd, father, mother, litterId, ownerName,
-      photo: photoData || photoUrl
+  <!-- Main JavaScript Functions -->
+  <script>
+    const stateCoords = {
+      "Kuala Lumpur": [3.1390, 101.6869],
+      "Selangor": [3.0738, 101.5183],
+      "Penang": [5.4141, 100.3288],
+      "Johor": [1.4854, 103.7618],
+      "Perak": [4.5921, 101.0901],
+      "Pahang": [3.8126, 103.3256],
+      "Kedah": [6.1184, 100.3685],
+      "Melaka": [2.1896, 102.2501],
+      "Negeri Sembilan": [2.7258, 101.9424],
+      "Kelantan": [6.1254, 102.2381],
+      "Terengganu": [5.3117, 103.1324],
+      "Perlis": [6.4449, 100.2048]
     };
 
-    const existingIndex = dogs.findIndex(d => d.id === id);
-    if (existingIndex > -1) {
-      dogs[existingIndex] = dogData;
-    } else {
-      dogs.push(dogData);
+    let dogs = JSON.parse(localStorage.getItem('dogs_data')) || [];
+    let litters = JSON.parse(localStorage.getItem('litters_data')) || [];
+    let breedingPlanDams = JSON.parse(localStorage.getItem('breeding_plan_dams')) || [];
+    let currentRoleFilter = 'All';
+    let map = null;
+    let mapMarkers = [];
+
+    // Helper to format date strings to DD/MM/YYYY
+    function formatDateToDMY(dateInput) {
+      if (!dateInput) return 'N/A';
+      const parts = dateInput.split('-');
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return dateInput;
     }
 
-    saveData();
-    closeDogModal();
-  };
+    // Helper to format Date objects to DD/MM/YYYY
+    function formatDateObjToDMY(dateObj) {
+      if (!dateObj || isNaN(dateObj.getTime())) return 'N/A';
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const yyyy = dateObj.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
 
-  if (photoInput.files && photoInput.files[0]) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      processSave(e.target.result);
-    };
-    reader.readAsDataURL(photoInput.files[0]);
-  } else {
-    processSave(photoUrl);
-  }
-}
+    function saveData() {
+      localStorage.setItem('dogs_data', JSON.stringify(dogs));
+      localStorage.setItem('litters_data', JSON.stringify(litters));
+      localStorage.setItem('breeding_plan_dams', JSON.stringify(breedingPlanDams));
+      render();
+    }
 
-function deleteDog(id) {
-  if (confirm('Are you sure you want to delete this dog profile?')) {
-    dogs = dogs.filter(d => d.id !== id);
-    breedingPlanDams = breedingPlanDams.filter(b => b.dogId !== id);
-    saveData();
-  }
-}
+    function updateFilterCounts() {
+      const roles = ['Sire', 'Dam', 'Available Puppy', 'Pet/Retired', 'Sold Puppy', 'To Be Decide'];
+      
+      const totalCount = dogs.length;
+      const elAll = document.getElementById('count-All');
+      if (elAll) elAll.innerText = totalCount;
 
-// --- Litter CRUD Operations ---
-function openLitterModal(litterId = null) {
-  const form = document.getElementById('litter-form');
-  form.reset();
-  document.getElementById('edit-litter-id').value = '';
-  document.getElementById('litter-puppies-table-body').innerHTML = '';
-  document.getElementById('litter-modal-title').innerText = 'Add New Litter';
+      roles.forEach(role => {
+        const count = dogs.filter(d => d.role === role).length;
+        const el = document.getElementById(`count-${role}`);
+        if (el) el.innerText = count;
+      });
+    }
 
-  if (litterId) {
-    const litter = litters.find(l => l.id === litterId);
-    if (litter) {
-      document.getElementById('edit-litter-id').value = litter.id;
-      document.getElementById('litter-code').value = litter.code || '';
-      document.getElementById('litter-offspring-num').value = litter.offspringNum || '';
-      document.getElementById('litter-father').value = litter.father || '';
-      document.getElementById('litter-mother').value = litter.mother || '';
-      document.getElementById('litter-date').value = litter.date || '';
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(`tab-${tab}`).classList.remove('hidden');
+      document.getElementById(`btn-${tab}`).classList.add('active');
+      if (tab === 'owners') setTimeout(initMap, 200);
+    }
+
+    function filterByRole(role) {
+      currentRoleFilter = role;
+      document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById(`filter-${role}`);
+      if (activeBtn) activeBtn.classList.add('active');
+      render();
+    }
+
+    function openViewLitterModal(litterId) {
+      const litter = litters.find(l => l.id === litterId);
+      if (!litter) return;
+
+      const associatedPuppies = dogs.filter(d => d.litterId === litter.id);
+      let puppiesHtml = '';
 
       if (litter.puppies && litter.puppies.length > 0) {
-        litter.puppies.forEach(p => addPuppyRow(p.gender, p.colour, p.name));
-      }
-      document.getElementById('litter-modal-title').innerText = 'Edit Litter Record';
-    }
-  }
-  document.getElementById('litter-modal').classList.remove('hidden');
-}
-
-function closeLitterModal() {
-  document.getElementById('litter-modal').classList.add('hidden');
-}
-
-function addPuppyRow(gender = 'Male', colour = 'Red', name = '') {
-  const tbody = document.getElementById('litter-puppies-table-body');
-  const tr = document.createElement('tr');
-  tr.className = 'border-b';
-  tr.innerHTML = `
-    <td class="p-1">
-      <select class="puppy-gender border rounded p-1 text-xs w-full">
-        <option value="Male" ${gender === 'Male' ? 'selected' : ''}>Male</option>
-        <option value="Female" ${gender === 'Female' ? 'selected' : ''}>Female</option>
-      </select>
-    </td>
-    <td class="p-1">
-      <select class="puppy-colour border rounded p-1 text-xs w-full">
-        <option value="Red" ${colour === 'Red' ? 'selected' : ''}>Red</option>
-        <option value="Black/Tan" ${colour === 'Black/Tan' ? 'selected' : ''}>Black/Tan</option>
-        <option value="Cream" ${colour === 'Cream' ? 'selected' : ''}>Cream</option>
-        <option value="Sesame" ${colour === 'Sesame' ? 'selected' : ''}>Sesame</option>
-      </select>
-    </td>
-    <td class="p-1">
-      <input type="text" list="all-dogs-list" class="puppy-name border rounded p-1 text-xs w-full" value="${name}" placeholder="Link or type name...">
-    </td>
-    <td class="p-1 text-center">
-      <button type="button" onclick="this.closest('tr').remove()" class="text-red-500 hover:text-red-700 font-bold">✕</button>
-    </td>
-  `;
-  tbody.appendChild(tr);
-}
-
-function saveLitter(event) {
-  event.preventDefault();
-  const id = document.getElementById('edit-litter-id').value || 'litter_' + Date.now();
-  const code = document.getElementById('litter-code').value;
-  const offspringNum = document.getElementById('litter-offspring-num').value;
-  const father = document.getElementById('litter-father').value;
-  const mother = document.getElementById('litter-mother').value;
-  const date = document.getElementById('litter-date').value;
-
-  const puppies = [];
-  document.querySelectorAll('#litter-puppies-table-body tr').forEach(tr => {
-    const pGender = tr.querySelector('.puppy-gender').value;
-    const pColour = tr.querySelector('.puppy-colour').value;
-    const pName = tr.querySelector('.puppy-name').value;
-    puppies.push({ gender: pGender, colour: pColour, name: pName });
-  });
-
-  const litterData = { id, code, offspringNum, father, mother, date, puppies };
-
-  const existingIndex = litters.findIndex(l => l.id === id);
-  if (existingIndex > -1) {
-    litters[existingIndex] = litterData;
-  } else {
-    litters.push(litterData);
-  }
-
-  saveData();
-  closeLitterModal();
-}
-
-function deleteLitter(id) {
-  if (confirm('Are you sure you want to delete this litter record?')) {
-    litters = litters.filter(l => l.id !== id);
-    saveData();
-  }
-}
-
-// --- Dynamic Table & UI Renderers ---
-function renderDogs() {
-  const list = document.getElementById('dogs-list');
-  list.innerHTML = '';
-
-  const filteredDogs = currentRoleFilter === 'All' 
-    ? dogs 
-    : dogs.filter(d => d.role === currentRoleFilter);
-
-  if (filteredDogs.length === 0) {
-    list.innerHTML = `<p class="text-slate-500 text-sm col-span-full text-center py-8">No dog records found for status "${currentRoleFilter}".</p>`;
-    return;
-  }
-
-  filteredDogs.forEach(dog => {
-    const card = document.createElement('div');
-    card.className = "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between";
-    card.innerHTML = `
-      <div>
-        <div class="relative aspect-square bg-slate-100">
-          <img src="${dog.photo || 'https://via.placeholder.com/300?text=No+Photo'}" alt="${dog.name}" class="w-full h-full object-cover">
-          <span class="absolute top-2 right-2 px-2.5 py-1 text-xs rounded-full font-semibold shadow-sm ${dog.gender === 'Male' ? 'bg-blue-600 text-white' : 'bg-pink-600 text-white'}">
-            ${dog.gender} · ${dog.role}
+        puppiesHtml = litter.puppies.map(p => `
+          <span class="inline-block bg-slate-100 border border-slate-200 text-slate-800 px-2 py-1 rounded text-xs mr-1 mb-1">
+            ${p.name ? renderParentLink(p.name) : 'Unnamed'} <span class="text-slate-400">(${p.gender} · ${p.colour})</span>
           </span>
+        `).join('');
+      } else if (associatedPuppies.length > 0) {
+        puppiesHtml = associatedPuppies.map(p => `
+          <span class="inline-block bg-slate-100 border border-slate-200 text-slate-800 px-2 py-1 rounded text-xs mr-1 mb-1">
+            ${renderParentLink(p.name)} <span class="text-slate-400">(${p.gender} · ${p.colour || 'Red'})</span>
+          </span>
+        `).join('');
+      } else {
+        puppiesHtml = '<p class="text-slate-400 text-xs">No puppies recorded</p>';
+      }
+
+      const container = document.getElementById('view-litter-content');
+      container.innerHTML = `
+        <div class="border-b pb-3">
+          <span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">Litter Details View</span>
+          <h3 class="text-2xl font-bold text-slate-800">${litter.code}</h3>
+          <p class="text-xs text-slate-500">Date of Birth: ${formatDateToDMY(litter.date)}</p>
         </div>
-        <div class="p-4 space-y-2">
-          <div class="flex justify-between items-start">
-            <h3 class="text-lg font-bold text-slate-800">${dog.name}</h3>
-            <span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">${dog.colour || 'Red'}</span>
+
+        <div class="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-3 rounded-lg border">
+          <div>
+            <p class="text-slate-500 font-medium">Sire (Father)</p>
+            <p class="text-sm font-bold">${renderParentLink(litter.father)}</p>
           </div>
-          <p class="text-xs text-slate-500">D.o.B: ${formatDateToDMY(dog.dob)}</p>
-
-          <div class="text-xs text-slate-600 space-y-1 pt-2 border-t">
-            <p><span class="font-semibold text-slate-700">Sire:</span> ${renderParentLink(dog.father)}</p>
-            <p><span class="font-semibold text-slate-700">Dam:</span> ${renderParentLink(dog.mother)}</p>
-            <p><span class="font-semibold text-slate-700">Litter:</span> ${renderLitterLink(dog.litterId)}</p>
-            <p><span class="font-semibold text-slate-700">Location:</span> ${dog.location || 'N/A'}</p>
-            
-            <div class="border-t pt-1.5 mt-1">
-              <p class="font-semibold text-slate-700 mb-0.5">Offspring / Puppies:</p>
-              <div>${renderOffspringLinks(dog.name)}</div>
-            </div>
-
-            ${dog.ownerName ? `<p class="text-slate-500 pt-1"><span class="font-semibold text-slate-700">Owner:</span> ${dog.ownerName}</p>` : ''}
+          <div>
+            <p class="text-slate-500 font-medium">Dam (Mother)</p>
+            <p class="text-sm font-bold">${renderParentLink(litter.mother)}</p>
           </div>
         </div>
-      </div>
 
-      <div class="bg-slate-50 p-3 border-t flex justify-end gap-2 admin-only">
-        <button onclick="openDogModal('${dog.id}')" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded font-medium transition">Edit</button>
-        <button onclick="deleteDog('${dog.id}')" class="text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1.5 rounded font-medium transition">Delete</button>
-      </div>
-    `;
-    list.appendChild(card);
-  });
-}
+        <div class="text-xs text-slate-600">
+          <p class="font-semibold text-slate-700 mb-2">Offspring (${litter.offspringNum || (litter.puppies ? litter.puppies.length : 0)}):</p>
+          <div>${puppiesHtml}</div>
+        </div>
+      `;
 
-function renderLitters() {
-  const list = document.getElementById('litters-list');
-  list.innerHTML = '';
+      document.getElementById('view-litter-modal').classList.remove('hidden');
+    }
 
-  if (litters.length === 0) {
-    list.innerHTML = `<p class="text-slate-500 text-sm col-span-full text-center py-8">No litter records found.</p>`;
-    return;
-  }
+    function closeViewLitterModal() {
+      document.getElementById('view-litter-modal').classList.add('hidden');
+    }
 
-  litters.forEach(litter => {
-    const card = document.createElement('div');
-    card.className = "bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3 flex flex-col justify-between";
-    
-    let puppiesHtml = '';
-    if (litter.puppies && litter.puppies.length > 0) {
-      puppiesHtml = litter.puppies.map(p => `
-        <span class="inline-block bg-slate-100 border text-slate-700 px-2 py-0.5 rounded text-xs mr-1 mb-1">
-          ${p.name ? renderParentLink(p.name) : 'Unnamed'} (${p.gender} · ${p.colour})
+    function renderParentLink(name) {
+      if (!name) return 'N/A';
+      return `<a href="javascript:void(0)" onclick="popProfileModal('${name}')" class="text-blue-600 hover:underline font-semibold">${name}</a>`;
+    }
+
+    function renderLitterLink(litterId) {
+      if (!litterId) return 'None';
+      const litter = litters.find(l => l.id === litterId);
+      if (litter) {
+        return `<a href="javascript:void(0)" onclick="openViewLitterModal('${litter.id}')" class="text-blue-600 hover:underline font-semibold">📋 ${litter.code}</a>`;
+      }
+      return 'None';
+    }
+
+    function getOffspringForDog(dogName) {
+      if (!dogName) return [];
+      const cleanName = dogName.trim().toLowerCase();
+      const offspringList = [];
+
+      dogs.forEach(d => {
+        if ((d.father && d.father.trim().toLowerCase() === cleanName) || 
+            (d.mother && d.mother.trim().toLowerCase() === cleanName)) {
+          if (!offspringList.some(o => o.name.toLowerCase() === d.name.toLowerCase())) {
+            offspringList.push({ name: d.name, gender: d.gender, colour: d.colour });
+          }
+        }
+      });
+
+      litters.forEach(l => {
+        if ((l.father && l.father.trim().toLowerCase() === cleanName) || 
+            (l.mother && l.mother.trim().toLowerCase() === cleanName)) {
+          if (l.puppies && l.puppies.length > 0) {
+            l.puppies.forEach(p => {
+              if (p.name && !offspringList.some(o => o.name.toLowerCase() === p.name.trim().toLowerCase())) {
+                offspringList.push({ name: p.name.trim(), gender: p.gender, colour: p.colour });
+              }
+            });
+          }
+        }
+      });
+
+      return offspringList;
+    }
+
+    function renderOffspringLinks(dogName) {
+      const offspring = getOffspringForDog(dogName);
+      if (offspring.length === 0) {
+        return '<span class="text-slate-400 text-xs">No offspring recorded</span>';
+      }
+      return offspring.map(o => `
+        <span class="inline-block bg-blue-50 border border-blue-200 text-blue-800 px-2 py-0.5 rounded text-[11px] font-medium mr-1 mb-1">
+          ${renderParentLink(o.name)} <span class="text-slate-400">(${o.gender} · ${o.colour || 'Red'})</span>
         </span>
       `).join('');
     }
 
-    card.innerHTML = `
-      <div class="space-y-3">
-        <div class="flex justify-between items-start border-b pb-2">
-          <div>
-            <h3 class="text-lg font-bold text-slate-800">${litter.code}</h3>
-            <p class="text-xs text-slate-500">Born: ${formatDateToDMY(litter.date)}</p>
-          </div>
-          <span class="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-semibold">
-            Offspring: ${litter.offspringNum || (litter.puppies ? litter.puppies.length : 0)}
-          </span>
-        </div>
+    function popProfileModal(dogName) {
+      const targetDog = dogs.find(d => d.name.trim().toLowerCase() === dogName.trim().toLowerCase());
+      if (!targetDog) {
+        alert(`Profile for "${dogName}" was manually entered and is not registered in the system database.`);
+        return;
+      }
 
-        <div class="text-xs text-slate-600 space-y-1">
-          <p><span class="font-semibold text-slate-700">Sire (Father):</span> ${renderParentLink(litter.father)}</p>
-          <p><span class="font-semibold text-slate-700">Dam (Mother):</span> ${renderParentLink(litter.mother)}</p>
-        </div>
-
-        ${puppiesHtml ? `<div class="border-t pt-2"><p class="text-xs font-semibold text-slate-700 mb-1">Offspring List:</p><div>${puppiesHtml}</div></div>` : ''}
-      </div>
-
-      <div class="flex justify-end gap-2 border-t pt-3 mt-2 admin-only">
-        <button onclick="openLitterModal('${litter.id}')" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded font-medium transition">Edit</button>
-        <button onclick="deleteLitter('${litter.id}')" class="text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1.5 rounded font-medium transition">Delete</button>
-      </div>
-    `;
-    list.appendChild(card);
-  });
-}
-
-function renderBreedingPlan() {
-  const tbody = document.getElementById('heat-table-body');
-  tbody.innerHTML = '';
-
-  if (breedingPlanDams.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-slate-400">No female dogs added to the breeding plan yet.</td></tr>`;
-    return;
-  }
-
-  breedingPlanDams.forEach(item => {
-    let estDue = 'N/A';
-    if (item.matingDate) {
-      const mDate = new Date(item.matingDate);
-      mDate.setDate(mDate.getDate() + 60);
-      estDue = formatDateObjToDMY(mDate);
-    }
-
-    let estNextHeat = 'N/A';
-    if (item.lastHeat) {
-      const hDate = new Date(item.lastHeat);
-      hDate.setDate(hDate.getDate() + 180);
-      estNextHeat = formatDateObjToDMY(hDate);
-    }
-
-    const tr = document.createElement('tr');
-    tr.className = "hover:bg-slate-50";
-    tr.innerHTML = `
-      <td class="p-1.5 font-semibold text-slate-800">${renderParentLink(item.name)}</td>
+      const container = document.getElementById('view-profile-content');
       
-      <!-- Last Heat -->
-      <td class="p-1.5">
-        <input type="date" value="${item.lastHeat || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'lastHeat', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
-        <span class="public-only">${formatDateToDMY(item.lastHeat)}</span>
-      </td>
+      container.innerHTML = `
+        <div class="space-y-3">
+          <img src="${targetDog.photo || 'https://via.placeholder.com/300?text=No+Photo'}" class="w-full aspect-square object-cover rounded-lg">
+          <div class="flex justify-between items-start">
+            <div>
+              <h3 class="text-xl font-bold text-slate-800">${targetDog.name}</h3>
+              <p class="text-xs text-slate-500">D.o.B: ${formatDateToDMY(targetDog.dob)}</p>
+            </div>
+            <span class="px-2 py-0.5 text-xs rounded-full font-medium ${targetDog.gender === 'Male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}">${targetDog.gender} · ${targetDog.role}</span>
+          </div>
 
-      <!-- Mating Date -->
-      <td class="p-1.5">
-        <input type="date" value="${item.matingDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matingDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
-        <span class="public-only">${formatDateToDMY(item.matingDate)}</span>
-      </td>
+          <div class="flex flex-wrap gap-1 text-xs">
+            <span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">🎨 ${targetDog.colour || 'Red'}</span>
+            <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">🌐 Born: ${targetDog.country || 'N/A'}</span>
+            <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">📍 Loc: ${targetDog.location || 'N/A'}</span>
+          </div>
 
-      <!-- Mated Sire -->
-      <td class="p-1.5">
-        <input type="text" list="sire-list" value="${item.matedSire || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matedSire', this.value)" placeholder="Sire..." class="admin-only border rounded px-1 py-0.5 text-[11px] w-24">
-        <span class="public-only">${item.matedSire ? renderParentLink(item.matedSire) : 'N/A'}</span>
-      </td>
+          <div class="text-xs text-slate-600 space-y-1.5 border-t pt-2">
+            <p><span class="font-semibold text-slate-700">Sire (Father):</span> ${renderParentLink(targetDog.father)}</p>
+            <p><span class="font-semibold text-slate-700">Dam (Mother):</span> ${renderParentLink(targetDog.mother)}</p>
+            <p><span class="font-semibold text-slate-700">Litter:</span> ${renderLitterLink(targetDog.litterId)}</p>
+            
+            <div class="border-t pt-2 mt-2">
+              <p class="font-semibold text-slate-700 mb-1">Offspring / Puppies:</p>
+              <div>${renderOffspringLinks(targetDog.name)}</div>
+            </div>
 
-      <!-- Est. Due -->
-      <td class="p-1.5 font-bold text-blue-600">${estDue}</td>
+            <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded border mt-2">
+              <p><span class="font-semibold text-slate-700">Patella Health:</span><br>${targetDog.patella || 'N/A'}</p>
+              <p><span class="font-semibold text-slate-700">HD Health:</span><br>${targetDog.hd || 'N/A'}</p>
+            </div>
+            ${targetDog.ownerName ? `<p class="pt-1"><span class="font-semibold text-slate-700">Owner:</span> ${targetDog.ownerName}</p>` : ''}
+          </div>
+        </div>
+      `;
 
-      <!-- Gave Birth? -->
-      <td class="p-1.5">
-        <select onchange="updateBreedingPlanField('${item.dogId}', 'gaveBirth', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
-          <option value="No" ${item.gaveBirth === 'No' ? 'selected' : ''}>No</option>
-          <option value="Yes" ${item.gaveBirth === 'Yes' ? 'selected' : ''}>Yes</option>
-        </select>
-        <span class="public-only">${item.gaveBirth || 'No'}</span>
-      </td>
-
-      <!-- Birth Date -->
-      <td class="p-1.5">
-        <input type="date" value="${item.birthDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'birthDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
-        <span class="public-only">${formatDateToDMY(item.birthDate)}</span>
-      </td>
-
-      <!-- Est Next Heat -->
-      <td class="p-1.5 font-bold text-amber-600">${estNextHeat}</td>
-
-      <!-- Next Breeding -->
-      <td class="p-1.5">
-        <select onchange="updateBreedingPlanField('${item.dogId}', 'nextBreeding', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
-          <option value="Skip Heat" ${item.nextBreeding === 'Skip Heat' ? 'selected' : ''}>Skip Heat</option>
-          <option value="Breed" ${item.nextBreeding === 'Breed' ? 'selected' : ''}>Breed</option>
-          <option value="Rest/Retired" ${item.nextBreeding === 'Rest/Retired' ? 'selected' : ''}>Rest/Retired</option>
-        </select>
-        <span class="public-only font-medium">${item.nextBreeding || 'Skip Heat'}</span>
-      </td>
-
-      <!-- Action -->
-      <td class="p-1.5 text-center admin-only">
-        <button onclick="deleteBreedingPlanDam('${item.dogId}')" class="text-red-500 hover:text-red-700 font-bold">✕</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function updateDatalists() {
-  const sireList = document.getElementById('sire-list');
-  const damList = document.getElementById('dam-list');
-  const allDogsList = document.getElementById('all-dogs-list');
-
-  sireList.innerHTML = dogs.filter(d => d.gender === 'Male' || d.role === 'Sire').map(d => `<option value="${d.name}">`).join('');
-  damList.innerHTML = dogs.filter(d => d.gender === 'Female' || d.role === 'Dam').map(d => `<option value="${d.name}">`).join('');
-  allDogsList.innerHTML = dogs.map(d => `<option value="${d.name}">`).join('');
-}
-
-// --- Map & Geography Functions ---
-function renderOwnersMapStats() {
-  const stateCounts = {};
-  Object.keys(stateCoords).forEach(state => stateCounts[state] = 0);
-
-  dogs.forEach(d => {
-    if (d.location && stateCounts[d.location] !== undefined) {
-      stateCounts[d.location]++;
+      document.getElementById('view-profile-modal').classList.remove('hidden');
     }
-  });
 
-  const container = document.getElementById('state-counts');
-  container.innerHTML = Object.entries(stateCounts)
-    .map(([state, count]) => `
-      <div class="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
-        <span class="font-medium text-slate-700">${state}</span>
-        <span class="px-2 py-0.5 bg-blue-100 text-blue-700 font-bold rounded-full">${count}</span>
-      </div>
-    `).join('');
-
-  return stateCounts;
-}
-
-function initMap() {
-  if (map) {
-    map.invalidateSize();
-    return;
-  }
-
-  map = L.map('map').setView([4.2105, 101.9758], 6);
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map);
-
-  updateMapMarkers();
-}
-
-function updateMapMarkers() {
-  if (!map) return;
-
-  mapMarkers.forEach(m => map.removeLayer(m));
-  mapMarkers = [];
-
-  const counts = renderOwnersMapStats();
-
-  Object.entries(counts).forEach(([state, count]) => {
-    if (count > 0 && stateCoords[state]) {
-      const marker = L.marker(stateCoords[state])
-        .addTo(map)
-        .bindPopup(`<b>${state}</b><br>${count} Shiba Inu(s) recorded.`);
-      mapMarkers.push(marker);
+    function closeProfileModal() {
+      document.getElementById('view-profile-modal').classList.add('hidden');
     }
-  });
-}
 
-// --- Main Render Execution ---
-function render() {
-  updateFilterCounts();
-  renderDogs();
-  renderLitters();
-  renderBreedingPlan();
-  updateDatalists();
-  renderOwnersMapStats();
-  if (map) updateMapMarkers();
-}
+    function openAddDamToPlanModal() {
+      const select = document.getElementById('select-dam-plan');
+      const femaleDogs = dogs.filter(d => d.gender === 'Female' || d.role === 'Dam');
+      
+      if (femaleDogs.length === 0) {
+        alert('No female dogs or Dams found in dog records. Please add female dogs first.');
+        return;
+      }
 
-// Initial Call
-render();
+      select.innerHTML = femaleDogs.map(d => `<option value="${d.id}">${d.name} (${d.role})</option>`).join('');
+      document.getElementById('add-dam-plan-modal').classList.remove('hidden');
+    }
+
+    function closeAddDamToPlanModal() {
+      document.getElementById('add-dam-plan-modal').classList.add('hidden');
+    }
+
+    function confirmAddDamToPlan() {
+      const selectedId = document.getElementById('select-dam-plan').value;
+      const dog = dogs.find(d => d.id === selectedId);
+      
+      if (!dog) return;
+
+      if (breedingPlanDams.some(b => b.dogId === dog.id)) {
+        alert(`${dog.name} is already in the breeding plan.`);
+        closeAddDamToPlanModal();
+        return;
+      }
+
+      breedingPlanDams.push({
+        dogId: dog.id,
+        name: dog.name,
+        lastHeat: '',
+        matingDate: '',
+        matedSire: '',
+        gaveBirth: 'No',
+        birthDate: '',
+        nextBreeding: 'Skip Heat'
+      });
+
+      saveData();
+      closeAddDamToPlanModal();
+    }
+
+    function openDogModal(dogId = null) {
+      const form = document.getElementById('dog-form');
+      form.reset();
+      document.getElementById('edit-dog-id').value = '';
+      document.getElementById('dog-modal-title').innerText = 'Add New Dog';
+
+      const litterSelect = document.getElementById('dog-litter');
+      litterSelect.innerHTML = '<option value="">None / Not associated</option>' + 
+        litters.map(l => `<option value="${l.id}">${l.code}</option>`).join('');
+
+      if (dogId) {
+        const dog = dogs.find(d => d.id === dogId);
+        if (dog) {
+          document.getElementById('edit-dog-id').value = dog.id;
+          document.getElementById('dog-name').value = dog.name || '';
+          document.getElementById('dog-gender').value = dog.gender || 'Male';
+          document.getElementById('dog-role').value = dog.role || 'Sire';
+          document.getElementById('dog-dob').value = dog.dob || '';
+          document.getElementById('dog-colour').value = dog.colour || 'Red';
+          document.getElementById('dog-country').value = dog.country || '';
+          document.getElementById('dog-location').value = dog.location || '';
+          document.getElementById('dog-patella').value = dog.patella || '';
+          document.getElementById('dog-hd').value = dog.hd || '';
+          document.getElementById('dog-father').value = dog.father || '';
+          document.getElementById('dog-mother').value = dog.mother || '';
+          document.getElementById('dog-litter').value = dog.litterId || '';
+          document.getElementById('owner-name').value = dog.ownerName || '';
+          document.getElementById('dog-modal-title').innerText = 'Edit Dog Profile';
+        }
+      }
+      document.getElementById('dog-modal').classList.remove('hidden');
+    }
+
+    function closeDogModal() {
+      document.getElementById('dog-modal').classList.add('hidden');
+    }
+
+    function saveDog(event) {
+      event.preventDefault();
+      const id = document.getElementById('edit-dog-id').value || 'dog_' + Date.now();
+      const name = document.getElementById('dog-name').value;
+      const gender = document.getElementById('dog-gender').value;
+      const role = document.getElementById('dog-role').value;
+      const dob = document.getElementById('dog-dob').value;
+      const colour = document.getElementById('dog-colour').value;
+      const country = document.getElementById('dog-country').value;
+      const location = document.getElementById('dog-location').value;
+      const patella = document.getElementById('dog-patella').value;
+      const hd = document.getElementById('dog-hd').value;
+      const father = document.getElementById('dog-father').value;
+      const mother = document.getElementById('dog-mother').value;
+      const litterId = document.getElementById('dog-litter').value;
+      const ownerName = document.getElementById('owner-name').value;
+      const photoInput = document.getElementById('dog-photo');
+
+      const existingDog = dogs.find(d => d.id === id);
+      let photoUrl = existingDog ? existingDog.photo : '';
+
+      const processSave = (photoData) => {
+        const dogData = {
+          id, name, gender, role, dob, colour, country, location, patella, hd, father, mother, litterId, ownerName,
+          photo: photoData || photoUrl
+        };
+
+        const existingIndex = dogs.findIndex(d => d.id === id);
+        if (existingIndex > -1) {
+          dogs[existingIndex] = dogData;
+        } else {
+          dogs.push(dogData);
+        }
+
+        saveData();
+        closeDogModal();
+      };
+
+      if (photoInput.files && photoInput.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          processSave(e.target.result);
+        };
+        reader.readAsDataURL(photoInput.files[0]);
+      } else {
+        processSave(photoUrl);
+      }
+    }
+
+    function deleteDog(id) {
+      if (confirm('Are you sure you want to delete this dog profile?')) {
+        dogs = dogs.filter(d => d.id !== id);
+        breedingPlanDams = breedingPlanDams.filter(b => b.dogId !== id);
+        saveData();
+      }
+    }
+
+    function openLitterModal(litterId = null) {
+      const form = document.getElementById('litter-form');
+      form.reset();
+      document.getElementById('edit-litter-id').value = '';
+      document.getElementById('litter-puppies-table-body').innerHTML = '';
+      document.getElementById('litter-modal-title').innerText = 'Add New Litter';
+
+      if (litterId) {
+        const litter = litters.find(l => l.id === litterId);
+        if (litter) {
+          document.getElementById('edit-litter-id').value = litter.id;
+          document.getElementById('litter-code').value = litter.code || '';
+          document.getElementById('litter-offspring-num').value = litter.offspringNum || '';
+          document.getElementById('litter-father').value = litter.father || '';
+          document.getElementById('litter-mother').value = litter.mother || '';
+          document.getElementById('litter-date').value = litter.date || '';
+
+          if (litter.puppies && litter.puppies.length > 0) {
+            litter.puppies.forEach(p => addPuppyRow(p.gender, p.colour, p.name));
+          }
+          document.getElementById('litter-modal-title').innerText = 'Edit Litter Record';
+        }
+      }
+      document.getElementById('litter-modal').classList.remove('hidden');
+    }
+
+    function closeLitterModal() {
+      document.getElementById('litter-modal').classList.add('hidden');
+    }
+
+    function addPuppyRow(gender = 'Male', colour = 'Red', name = '') {
+      const tbody = document.getElementById('litter-puppies-table-body');
+      const tr = document.createElement('tr');
+      tr.className = 'border-b';
+      tr.innerHTML = `
+        <td class="p-1">
+          <select class="puppy-gender border rounded p-1 text-xs w-full">
+            <option value="Male" ${gender === 'Male' ? 'selected' : ''}>Male</option>
+            <option value="Female" ${gender === 'Female' ? 'selected' : ''}>Female</option>
+          </select>
+        </td>
+        <td class="p-1">
+          <select class="puppy-colour border rounded p-1 text-xs w-full">
+            <option value="Red" ${colour === 'Red' ? 'selected' : ''}>Red</option>
+            <option value="Black/Tan" ${colour === 'Black/Tan' ? 'selected' : ''}>Black/Tan</option>
+            <option value="Cream" ${colour === 'Cream' ? 'selected' : ''}>Cream</option>
+            <option value="Sesame" ${colour === 'Sesame' ? 'selected' : ''}>Sesame</option>
+          </select>
+        </td>
+        <td class="p-1">
+          <input type="text" list="all-dogs-list" class="puppy-name border rounded p-1 text-xs w-full" value="${name}" placeholder="Link or type name...">
+        </td>
+        <td class="p-1 text-center">
+          <button type="button" onclick="this.closest('tr').remove()" class="text-red-500 hover:text-red-700 font-bold">✕</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    function saveLitter(event) {
+      event.preventDefault();
+      const id = document.getElementById('edit-litter-id').value || 'litter_' + Date.now();
+      const code = document.getElementById('litter-code').value;
+      const offspringNum = document.getElementById('litter-offspring-num').value;
+      const father = document.getElementById('litter-father').value;
+      const mother = document.getElementById('litter-mother').value;
+      const date = document.getElementById('litter-date').value;
+
+      const puppies = [];
+      document.querySelectorAll('#litter-puppies-table-body tr').forEach(tr => {
+        const pGender = tr.querySelector('.puppy-gender').value;
+        const pColour = tr.querySelector('.puppy-colour').value;
+        const pName = tr.querySelector('.puppy-name').value;
+        puppies.push({ gender: pGender, colour: pColour, name: pName });
+      });
+
+      const litterData = { id, code, offspringNum, father, mother, date, puppies };
+
+      const existingIndex = litters.findIndex(l => l.id === id);
+      if (existingIndex > -1) {
+        litters[existingIndex] = litterData;
+      } else {
+        litters.push(litterData);
+      }
+
+      saveData();
+      closeLitterModal();
+    }
+
+    function deleteLitter(id) {
+      if (confirm('Are you sure you want to delete this litter record?')) {
+        litters = litters.filter(l => l.id !== id);
+        saveData();
+      }
+    }
+
+    function deleteBreedingPlanDam(dogId) {
+      if (confirm('Remove this female from the breeding plan tracker?')) {
+        breedingPlanDams = breedingPlanDams.filter(b => b.dogId !== dogId);
+        saveData();
+      }
+    }
+
+    function updateBreedingPlanField(dogId, field, value) {
+      const item = breedingPlanDams.find(b => b.dogId === dogId);
+      if (item) {
+        item[field] = value;
+        saveData();
+      }
+    }
+
+    function renderDogs() {
+      const list = document.getElementById('dogs-list');
+      list.innerHTML = '';
+
+      const filteredDogs = currentRoleFilter === 'All' 
+        ? dogs 
+        : dogs.filter(d => d.role === currentRoleFilter);
+
+      if (filteredDogs.length === 0) {
+        list.innerHTML = `<p class="text-slate-500 text-sm col-span-full text-center py-8">No dog records found for status "${currentRoleFilter}".</p>`;
+        return;
+      }
+
+      filteredDogs.forEach(dog => {
+        const card = document.createElement('div');
+        card.className = "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between";
+        card.innerHTML = `
+          <div>
+            <div class="relative aspect-square bg-slate-100">
+              <img src="${dog.photo || 'https://via.placeholder.com/300?text=No+Photo'}" alt="${dog.name}" class="w-full h-full object-cover">
+              <span class="absolute top-2 right-2 px-2.5 py-1 text-xs rounded-full font-semibold shadow-sm ${dog.gender === 'Male' ? 'bg-blue-600 text-white' : 'bg-pink-600 text-white'}">
+                ${dog.gender} · ${dog.role}
+              </span>
+            </div>
+            <div class="p-4 space-y-2">
+              <div class="flex justify-between items-start">
+                <h3 class="text-lg font-bold text-slate-800">${dog.name}</h3>
+                <span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">${dog.colour || 'Red'}</span>
+              </div>
+              <p class="text-xs text-slate-500">D.o.B: ${formatDateToDMY(dog.dob)}</p>
+
+              <div class="text-xs text-slate-600 space-y-1 pt-2 border-t">
+                <p><span class="font-semibold text-slate-700">Sire:</span> ${renderParentLink(dog.father)}</p>
+                <p><span class="font-semibold text-slate-700">Dam:</span> ${renderParentLink(dog.mother)}</p>
+                <p><span class="font-semibold text-slate-700">Litter:</span> ${renderLitterLink(dog.litterId)}</p>
+                <p><span class="font-semibold text-slate-700">Location:</span> ${dog.location || 'N/A'}</p>
+                
+                <div class="border-t pt-1.5 mt-1">
+                  <p class="font-semibold text-slate-700 mb-0.5">Offspring / Puppies:</p>
+                  <div>${renderOffspringLinks(dog.name)}</div>
+                </div>
+
+                ${dog.ownerName ? `<p class="text-slate-500 pt-1"><span class="font-semibold text-slate-700">Owner:</span> ${dog.ownerName}</p>` : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-slate-50 p-3 border-t flex justify-end gap-2 admin-only">
+            <button onclick="openDogModal('${dog.id}')" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded font-medium transition">Edit</button>
+            <button onclick="deleteDog('${dog.id}')" class="text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1.5 rounded font-medium transition">Delete</button>
+          </div>
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    function renderLitters() {
+      const list = document.getElementById('litters-list');
+      list.innerHTML = '';
+
+      if (litters.length === 0) {
+        list.innerHTML = `<p class="text-slate-500 text-sm col-span-full text-center py-8">No litter records found.</p>`;
+        return;
+      }
+
+      litters.forEach(litter => {
+        const card = document.createElement('div');
+        card.className = "bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3 flex flex-col justify-between";
+        
+        let puppiesHtml = '';
+        if (litter.puppies && litter.puppies.length > 0) {
+          puppiesHtml = litter.puppies.map(p => `
+            <span class="inline-block bg-slate-100 border text-slate-700 px-2 py-0.5 rounded text-xs mr-1 mb-1">
+              ${p.name ? renderParentLink(p.name) : 'Unnamed'} (${p.gender} · ${p.colour})
+            </span>
+          `).join('');
+        }
+
+        card.innerHTML = `
+          <div class="space-y-3">
+            <div class="flex justify-between items-start border-b pb-2">
+              <div>
+                <h3 class="text-lg font-bold text-slate-800">${litter.code}</h3>
+                <p class="text-xs text-slate-500">Born: ${formatDateToDMY(litter.date)}</p>
+              </div>
+              <span class="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-semibold">
+                Offspring: ${litter.offspringNum || (litter.puppies ? litter.puppies.length : 0)}
+              </span>
+            </div>
+
+            <div class="text-xs text-slate-600 space-y-1">
+              <p><span class="font-semibold text-slate-700">Sire (Father):</span> ${renderParentLink(litter.father)}</p>
+              <p><span class="font-semibold text-slate-700">Dam (Mother):</span> ${renderParentLink(litter.mother)}</p>
+            </div>
+
+            ${puppiesHtml ? `<div class="border-t pt-2"><p class="text-xs font-semibold text-slate-700 mb-1">Offspring List:</p><div>${puppiesHtml}</div></div>` : ''}
+          </div>
+
+          <div class="flex justify-end gap-2 border-t pt-3 mt-2 admin-only">
+            <button onclick="openLitterModal('${litter.id}')" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded font-medium transition">Edit</button>
+            <button onclick="deleteLitter('${litter.id}')" class="text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1.5 rounded font-medium transition">Delete</button>
+          </div>
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    function renderBreedingPlan() {
+      const tbody = document.getElementById('heat-table-body');
+      tbody.innerHTML = '';
+
+      if (breedingPlanDams.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-slate-400">No female dogs added to the breeding plan yet.</td></tr>`;
+        return;
+      }
+
+      breedingPlanDams.forEach(item => {
+        let estDue = 'N/A';
+        if (item.matingDate) {
+          const mDate = new Date(item.matingDate);
+          mDate.setDate(mDate.getDate() + 60);
+          estDue = formatDateObjToDMY(mDate);
+        }
+
+        let estNextHeat = 'N/A';
+        if (item.lastHeat) {
+          const hDate = new Date(item.lastHeat);
+          hDate.setDate(hDate.getDate() + 180);
+          estNextHeat = formatDateObjToDMY(hDate);
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50";
+        tr.innerHTML = `
+          <td class="p-1.5 font-semibold text-slate-800">${renderParentLink(item.name)}</td>
+          
+          <!-- Last Heat -->
+          <td class="p-1.5">
+            <input type="date" value="${item.lastHeat || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'lastHeat', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.lastHeat)}</span>
+          </td>
+
+          <!-- Mating Date -->
+          <td class="p-1.5">
+            <input type="date" value="${item.matingDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matingDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.matingDate)}</span>
+          </td>
+
+          <!-- Mated Sire -->
+          <td class="p-1.5">
+            <input type="text" list="sire-list" value="${item.matedSire || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matedSire', this.value)" placeholder="Sire..." class="admin-only border rounded px-1 py-0.5 text-[11px] w-24">
+            <span class="public-only">${item.matedSire ? renderParentLink(item.matedSire) : 'N/A'}</span>
+          </td>
+
+          <!-- Est. Due -->
+          <td class="p-1.5 font-bold text-blue-600">${estDue}</td>
+
+          <!-- Gave Birth? -->
+          <td class="p-1.5">
+            <select onchange="updateBreedingPlanField('${item.dogId}', 'gaveBirth', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+              <option value="No" ${item.gaveBirth === 'No' ? 'selected' : ''}>No</option>
+              <option value="Yes" ${item.gaveBirth === 'Yes' ? 'selected' : ''}>Yes</option>
+            </select>
+            <span class="public-only">${item.gaveBirth || 'No'}</span>
+          </td>
+
+          <!-- Birth Date -->
+          <td class="p-1.5">
+            <input type="date" value="${item.birthDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'birthDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.birthDate)}</span>
+          </td>
+
+          <!-- Est Next Heat -->
+          <td class="p-1.5 font-bold text-amber-600">${estNextHeat}</td>
+
+          <!-- Next Breeding -->
+          <td class="p-1.5">
+            <select onchange="updateBreedingPlanField('${item.dogId}', 'nextBreeding', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+              <option value="Skip Heat" ${item.nextBreeding === 'Skip Heat' ? 'selected' : ''}>Skip Heat</option>
+              <option value="Breed" ${item.nextBreeding === 'Breed' ? 'selected' : ''}>Breed</option>
+              <option value="Rest/Retired" ${item.nextBreeding === 'Rest/Retired' ? 'selected' : ''}>Rest/Retired</option>
+            </select>
+            <span class="public-only font-medium">${item.nextBreeding || 'Skip Heat'}</span>
+          </td>
+
+          <!-- Action -->
+          <td class="p-1.5 text-center admin-only">
+            <button onclick="deleteBreedingPlanDam('${item.dogId}')" class="text-red-500 hover:text-red-700 font-bold">✕</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateDatalists() {
+      const sireList = document.getElementById('sire-list');
+      const damList = document.getElementById('dam-list');
+      const allDogsList = document.getElementById('all-dogs-list');
+
+      sireList.innerHTML = dogs.filter(d => d.gender === 'Male' || d.role === 'Sire').map(d => `<option value="${d.name}">`).join('');
+      damList.innerHTML = dogs.filter(d => d.gender === 'Female' || d.role === 'Dam').map(d => `<option value="${d.name}">`).join('');
+      allDogsList.innerHTML = dogs.map(d => `<option value="${d.name}">`).join('');
+    }
+
+    function renderOwnersMapStats() {
+      const stateCounts = {};
+      Object.keys(stateCoords).forEach(state => stateCounts[state] = 0);
+
+      dogs.forEach(d => {
+        if (d.location && stateCounts[d.location] !== undefined) {
+          stateCounts[d.location]++;
+        }
+      });
+
+      const container = document.getElementById('state-counts');
+      container.innerHTML = Object.entries(stateCounts)
+        .map(([state, count]) => `
+          <div class="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
+            <span class="font-medium text-slate-700">${state}</span>
+            <span class="px-2 py-0.5 bg-blue-100 text-blue-700 font-bold rounded-full">${count}</span>
+          </div>
+        `).join('');
+
+      return stateCounts;
+    }
+
+    function initMap() {
+      if (map) {
+        map.invalidateSize();
+        return;
+      }
+
+      map = L.map('map').setView([4.2105, 101.9758], 6);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map);
+
+      updateMapMarkers();
+    }
+
+    function updateMapMarkers() {
+      if (!map) return;
+
+      mapMarkers.forEach(m => map.removeLayer(m));
+      mapMarkers = [];
+
+      const counts = renderOwnersMapStats();
+
+      Object.entries(counts).forEach(([state, count]) => {
+        if (count > 0 && stateCoords[state]) {
+          const marker = L.marker(stateCoords[state])
+            .addTo(map)
+            .bindPopup(`<b>${state}</b><br>${count} Shiba Inu(s) recorded.`);
+          mapMarkers.push(marker);
+        }
+      });
+    }
+
+    function render() {
+      updateFilterCounts();
+      renderDogs();
+      renderLitters();
+      renderBreedingPlan();
+      updateDatalists();
+      renderOwnersMapStats();
+      if (map) updateMapMarkers();
+    }
+
+    render();
+  </script>
+
+  <!-- Firebase JavaScript SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyByCwUR4c4a1WVU5jP-8MLP_qFRWVtu2rk",
+      authDomain: "joyfido-pedigree.firebaseapp.com",
+      projectId: "joyfido-pedigree",
+      storageBucket: "joyfido-pedigree.firebasestorage.app",
+      messagingSenderId: "1051734885863",
+      appId: "1:1051734885863:web:1ceeb9c42cae0b336de942",
+      measurementId: "G-RKQWG0M6YX"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    onAuthStateChanged(auth, (user) => {
+      const authBtn = document.getElementById('auth-btn');
+
+      if (user) {
+        document.body.classList.add('is-admin');
+        if (authBtn) authBtn.innerText = 'Logout';
+      } else {
+        document.body.classList.remove('is-admin');
+        if (authBtn) authBtn.innerText = 'Login as Admin';
+      }
+      renderBreedingPlan(); // Re-render table elements upon auth state change
+    });
+
+    window.toggleAuth = function() {
+      if (auth.currentUser) {
+        signOut(auth);
+      } else {
+        const email = prompt("Enter Admin Email:");
+        const password = prompt("Enter Admin Password:");
+        if (email && password) {
+          signInWithEmailAndPassword(auth, email, password)
+            .catch(error => alert("Login failed: " + error.message));
+        }
+      }
+    };
+  </script>
+</body>
+</html>
