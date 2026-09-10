@@ -13,7 +13,9 @@
     #map { height: 380px; width: 100%; border-radius: 0.5rem; }
     .nav-btn.active { background-color: #3b82f6; color: white; }
     .filter-btn.active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
-    .admin-only { display: none; } /* Hidden by default for non-admins */
+    .admin-only { display: none; }
+    body.is-admin .admin-only { display: block !important; }
+    body.is-admin button.admin-only, body.is-admin a.admin-only { display: inline-block !important; }
   </style>
 </head>
 <body class="bg-slate-100 font-sans text-slate-800 min-h-screen flex flex-col justify-between">
@@ -395,53 +397,7 @@
   <!-- Dog Selection Datalist -->
   <datalist id="all-dogs-list"></datalist>
 
-  <!-- Firebase JavaScript SDKs -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyByCwUR4c4a1WVU5jP-8MLP_qFRWVtu2rk",
-      authDomain: "joyfido-pedigree.firebaseapp.com",
-      projectId: "joyfido-pedigree",
-      storageBucket: "joyfido-pedigree.firebasestorage.app",
-      messagingSenderId: "1051734885863",
-      appId: "1:1051734885863:web:1ceeb9c42cae0b336de942",
-      measurementId: "G-RKQWG0M6YX"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    onAuthStateChanged(auth, (user) => {
-      const adminElements = document.querySelectorAll('.admin-only');
-      const authBtn = document.getElementById('auth-btn');
-
-      if (user) {
-        adminElements.forEach(el => el.style.display = 'inline-block');
-        if (authBtn) authBtn.innerText = 'Logout';
-      } else {
-        adminElements.forEach(el => el.style.display = 'none');
-        if (authBtn) authBtn.innerText = 'Login as Admin';
-      }
-    });
-
-    window.toggleAuth = function() {
-      if (auth.currentUser) {
-        signOut(auth);
-      } else {
-        const email = prompt("Enter Admin Email:");
-        const password = prompt("Enter Admin Password:");
-        if (email && password) {
-          signInWithEmailAndPassword(auth, email, password)
-            .catch(error => alert("Login failed: " + error.message));
-        }
-      }
-    };
-  </script>
-
+  <!-- Main JavaScript Functions -->
   <script>
     const stateCoords = {
       "Kuala Lumpur": [3.1390, 101.6869],
@@ -1152,6 +1108,52 @@
     }
 
     render();
+  </script>
+
+  <!-- Firebase JavaScript SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyByCwUR4c4a1WVU5jP-8MLP_qFRWVtu2rk",
+      authDomain: "joyfido-pedigree.firebaseapp.com",
+      projectId: "joyfido-pedigree",
+      storageBucket: "joyfido-pedigree.firebasestorage.app",
+      messagingSenderId: "1051734885863",
+      appId: "1:1051734885863:web:1ceeb9c42cae0b336de942",
+      measurementId: "G-RKQWG0M6YX"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    onAuthStateChanged(auth, (user) => {
+      const authBtn = document.getElementById('auth-btn');
+
+      if (user) {
+        document.body.classList.add('is-admin');
+        if (authBtn) authBtn.innerText = 'Logout';
+      } else {
+        document.body.classList.remove('is-admin');
+        if (authBtn) authBtn.innerText = 'Login as Admin';
+      }
+    });
+
+    window.toggleAuth = function() {
+      if (auth.currentUser) {
+        signOut(auth);
+      } else {
+        const email = prompt("Enter Admin Email:");
+        const password = prompt("Enter Admin Password:");
+        if (email && password) {
+          signInWithEmailAndPassword(auth, email, password)
+            .catch(error => alert("Login failed: " + error.message));
+        }
+      }
+    };
   </script>
 </body>
 </html>
