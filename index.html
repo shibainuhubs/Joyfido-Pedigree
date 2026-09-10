@@ -13,9 +13,16 @@
     #map { height: 380px; width: 100%; border-radius: 0.5rem; }
     .nav-btn.active { background-color: #3b82f6; color: white; }
     .filter-btn.active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
-    .admin-only { display: none; }
+    
+    /* Admin visibility rules */
+    .admin-only { display: none !important; }
     body.is-admin .admin-only { display: block !important; }
     body.is-admin button.admin-only, body.is-admin a.admin-only { display: inline-block !important; }
+    body.is-admin table .admin-only { display: table-cell !important; }
+
+    /* Public view element rules */
+    .public-only { display: block !important; }
+    body.is-admin .public-only { display: none !important; }
   </style>
 </head>
 <body class="bg-slate-100 font-sans text-slate-800 min-h-screen flex flex-col justify-between">
@@ -94,7 +101,7 @@
         </div>
       </section>
 
-      <!-- 3. Breeding Plan Tab -->
+      <!-- 3. Breeding Plan Tab (PUBLIC READ, ADMIN EDIT) -->
       <section id="tab-heat" class="tab-content hidden space-y-6">
         <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-2">
@@ -421,6 +428,25 @@
     let map = null;
     let mapMarkers = [];
 
+    // Helper to format date strings to DD/MM/YYYY
+    function formatDateToDMY(dateInput) {
+      if (!dateInput) return 'N/A';
+      const parts = dateInput.split('-');
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return dateInput;
+    }
+
+    // Helper to format Date objects to DD/MM/YYYY
+    function formatDateObjToDMY(dateObj) {
+      if (!dateObj || isNaN(dateObj.getTime())) return 'N/A';
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const yyyy = dateObj.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
+
     function saveData() {
       localStorage.setItem('dogs_data', JSON.stringify(dogs));
       localStorage.setItem('litters_data', JSON.stringify(litters));
@@ -486,7 +512,7 @@
         <div class="border-b pb-3">
           <span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">Litter Details View</span>
           <h3 class="text-2xl font-bold text-slate-800">${litter.code}</h3>
-          <p class="text-xs text-slate-500">Date of Birth: ${litter.date || 'N/A'}</p>
+          <p class="text-xs text-slate-500">Date of Birth: ${formatDateToDMY(litter.date)}</p>
         </div>
 
         <div class="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-3 rounded-lg border">
@@ -584,7 +610,7 @@
           <div class="flex justify-between items-start">
             <div>
               <h3 class="text-xl font-bold text-slate-800">${targetDog.name}</h3>
-              <p class="text-xs text-slate-500">D.o.B: ${targetDog.dob || 'N/A'}</p>
+              <p class="text-xs text-slate-500">D.o.B: ${formatDateToDMY(targetDog.dob)}</p>
             </div>
             <span class="px-2 py-0.5 text-xs rounded-full font-medium ${targetDog.gender === 'Male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}">${targetDog.gender} · ${targetDog.role}</span>
           </div>
@@ -899,7 +925,7 @@
                 <h3 class="text-lg font-bold text-slate-800">${dog.name}</h3>
                 <span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">${dog.colour || 'Red'}</span>
               </div>
-              <p class="text-xs text-slate-500">D.o.B: ${dog.dob || 'N/A'}</p>
+              <p class="text-xs text-slate-500">D.o.B: ${formatDateToDMY(dog.dob)}</p>
 
               <div class="text-xs text-slate-600 space-y-1 pt-2 border-t">
                 <p><span class="font-semibold text-slate-700">Sire:</span> ${renderParentLink(dog.father)}</p>
@@ -953,7 +979,7 @@
             <div class="flex justify-between items-start border-b pb-2">
               <div>
                 <h3 class="text-lg font-bold text-slate-800">${litter.code}</h3>
-                <p class="text-xs text-slate-500">Born: ${litter.date || 'N/A'}</p>
+                <p class="text-xs text-slate-500">Born: ${formatDateToDMY(litter.date)}</p>
               </div>
               <span class="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-semibold">
                 Offspring: ${litter.offspringNum || (litter.puppies ? litter.puppies.length : 0)}
@@ -982,7 +1008,7 @@
       tbody.innerHTML = '';
 
       if (breedingPlanDams.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-slate-400">No female dogs added to the breeding plan yet. Click "Add Dam/Female to Plan".</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-slate-400">No female dogs added to the breeding plan yet.</td></tr>`;
         return;
       }
 
@@ -991,39 +1017,71 @@
         if (item.matingDate) {
           const mDate = new Date(item.matingDate);
           mDate.setDate(mDate.getDate() + 60);
-          estDue = mDate.toISOString().split('T')[0];
+          estDue = formatDateObjToDMY(mDate);
         }
 
         let estNextHeat = 'N/A';
         if (item.lastHeat) {
           const hDate = new Date(item.lastHeat);
           hDate.setDate(hDate.getDate() + 180);
-          estNextHeat = hDate.toISOString().split('T')[0];
+          estNextHeat = formatDateObjToDMY(hDate);
         }
 
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50";
         tr.innerHTML = `
           <td class="p-1.5 font-semibold text-slate-800">${renderParentLink(item.name)}</td>
-          <td class="p-1.5"><input type="date" value="${item.lastHeat || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'lastHeat', this.value)" class="border rounded px-1 py-0.5 text-[11px]"></td>
-          <td class="p-1.5"><input type="date" value="${item.matingDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matingDate', this.value)" class="border rounded px-1 py-0.5 text-[11px]"></td>
-          <td class="p-1.5"><input type="text" list="sire-list" value="${item.matedSire || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matedSire', this.value)" placeholder="Sire..." class="border rounded px-1 py-0.5 text-[11px] w-24"></td>
-          <td class="p-1.5 font-bold text-blue-600">${estDue}</td>
+          
+          <!-- Last Heat -->
           <td class="p-1.5">
-            <select onchange="updateBreedingPlanField('${item.dogId}', 'gaveBirth', this.value)" class="border rounded px-1 py-0.5 text-[11px]">
+            <input type="date" value="${item.lastHeat || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'lastHeat', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.lastHeat)}</span>
+          </td>
+
+          <!-- Mating Date -->
+          <td class="p-1.5">
+            <input type="date" value="${item.matingDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matingDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.matingDate)}</span>
+          </td>
+
+          <!-- Mated Sire -->
+          <td class="p-1.5">
+            <input type="text" list="sire-list" value="${item.matedSire || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'matedSire', this.value)" placeholder="Sire..." class="admin-only border rounded px-1 py-0.5 text-[11px] w-24">
+            <span class="public-only">${item.matedSire ? renderParentLink(item.matedSire) : 'N/A'}</span>
+          </td>
+
+          <!-- Est. Due -->
+          <td class="p-1.5 font-bold text-blue-600">${estDue}</td>
+
+          <!-- Gave Birth? -->
+          <td class="p-1.5">
+            <select onchange="updateBreedingPlanField('${item.dogId}', 'gaveBirth', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
               <option value="No" ${item.gaveBirth === 'No' ? 'selected' : ''}>No</option>
               <option value="Yes" ${item.gaveBirth === 'Yes' ? 'selected' : ''}>Yes</option>
             </select>
+            <span class="public-only">${item.gaveBirth || 'No'}</span>
           </td>
-          <td class="p-1.5"><input type="date" value="${item.birthDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'birthDate', this.value)" class="border rounded px-1 py-0.5 text-[11px]"></td>
-          <td class="p-1.5 font-bold text-amber-600">${estNextHeat}</td>
+
+          <!-- Birth Date -->
           <td class="p-1.5">
-            <select onchange="updateBreedingPlanField('${item.dogId}', 'nextBreeding', this.value)" class="border rounded px-1 py-0.5 text-[11px]">
+            <input type="date" value="${item.birthDate || ''}" onchange="updateBreedingPlanField('${item.dogId}', 'birthDate', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
+            <span class="public-only">${formatDateToDMY(item.birthDate)}</span>
+          </td>
+
+          <!-- Est Next Heat -->
+          <td class="p-1.5 font-bold text-amber-600">${estNextHeat}</td>
+
+          <!-- Next Breeding -->
+          <td class="p-1.5">
+            <select onchange="updateBreedingPlanField('${item.dogId}', 'nextBreeding', this.value)" class="admin-only border rounded px-1 py-0.5 text-[11px]">
               <option value="Skip Heat" ${item.nextBreeding === 'Skip Heat' ? 'selected' : ''}>Skip Heat</option>
               <option value="Breed" ${item.nextBreeding === 'Breed' ? 'selected' : ''}>Breed</option>
               <option value="Rest/Retired" ${item.nextBreeding === 'Rest/Retired' ? 'selected' : ''}>Rest/Retired</option>
             </select>
+            <span class="public-only font-medium">${item.nextBreeding || 'Skip Heat'}</span>
           </td>
+
+          <!-- Action -->
           <td class="p-1.5 text-center admin-only">
             <button onclick="deleteBreedingPlanDam('${item.dogId}')" class="text-red-500 hover:text-red-700 font-bold">✕</button>
           </td>
@@ -1140,6 +1198,7 @@
         document.body.classList.remove('is-admin');
         if (authBtn) authBtn.innerText = 'Login as Admin';
       }
+      renderBreedingPlan(); // Re-render table elements upon auth state change
     });
 
     window.toggleAuth = function() {
