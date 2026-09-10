@@ -1113,3 +1113,94 @@
   </script>
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joyfido Pedigree</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background-color: #f9f9f9; }
+    .header { display: flex; justify-content: space-between; align-items: center; }
+    .admin-only { display: none; } /* Hidden by default for public visitors */
+    .card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ddd; }
+    .btn { padding: 8px 12px; cursor: pointer; border: none; border-radius: 4px; }
+    .btn-login { background-color: #007bff; color: white; }
+    .btn-edit { background-color: #ffc107; color: black; margin-right: 5px; }
+    .btn-delete { background-color: #dc3545; color: white; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Joyfido Pedigree</h1>
+    <button id="auth-btn" class="btn btn-login" onclick="toggleAuth()">Login as Admin</button>
+  </div>
+
+  <hr>
+
+  <!-- Content Section -->
+  <h2>Dog Profiles</h2>
+  <button class="btn btn-login admin-only" style="margin-bottom: 15px;">+ Add New Dog</button>
+
+  <div class="card">
+    <h3>Max (Doberman)</h3>
+    <p>Age: 2 years</p>
+    <!-- Edit/Delete buttons are restricted to Admin -->
+    <button class="btn btn-edit admin-only">Edit Profile</button>
+    <button class="btn btn-delete admin-only">Delete Profile</button>
+  </div>
+
+  <!-- Firebase JavaScript SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // Your exact Firebase configuration keys
+    const firebaseConfig = {
+      apiKey: "AIzaSyByCwUR4c4a1WVU5jP-8MLP_qFRWVtu2rk",
+      authDomain: "joyfido-pedigree.firebaseapp.com",
+      projectId: "joyfido-pedigree",
+      storageBucket: "joyfido-pedigree.firebasestorage.app",
+      messagingSenderId: "1051734885863",
+      appId: "1:1051734885863:web:1ceeb9c42cae0b336de942",
+      measurementId: "G-RKQWG0M6YX"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Track authentication state automatically
+    onAuthStateChanged(auth, (user) => {
+      const adminElements = document.querySelectorAll('.admin-only');
+      const authBtn = document.getElementById('auth-btn');
+
+      if (user) {
+        // User is logged in: Show edit controls
+        adminElements.forEach(el => el.style.display = 'inline-block');
+        authBtn.innerText = 'Logout';
+      } else {
+        // User is logged out: Hide edit controls (Public view)
+        adminElements.forEach(el => el.style.display = 'none');
+        authBtn.innerText = 'Login as Admin';
+      }
+    });
+
+    // Login/Logout function toggle
+    window.toggleAuth = function() {
+      if (auth.currentUser) {
+        signOut(auth);
+      } else {
+        const email = prompt("Enter Admin Email:");
+        const password = prompt("Enter Admin Password:");
+        if (email && password) {
+          signInWithEmailAndPassword(auth, email, password)
+            .catch(error => alert("Login failed: " + error.message));
+        }
+      }
+    };
+  </script>
+</body>
+</html>
