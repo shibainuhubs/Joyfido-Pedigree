@@ -122,7 +122,7 @@
                   <th class="p-1.5">Birth Date</th>
                   <th class="p-1.5">Est. Next Heat</th>
                   <th class="p-1.5">Next Breeding</th>
-                  <th class="p-1.5 text-center admin-only">Action</th>
+                  <th class="p-1.5 text-center">Action</th>
                 </tr>
               </thead>
               <tbody id="heat-table-body" class="divide-y">
@@ -1101,12 +1101,28 @@
     }
 
     function renderOwnersMapStats() {
-      const stateCounts = {};
-      Object.keys(stateCoords).forEach(state => stateCounts[state] = 0);
+      const stateCounts = {
+        "Kuala Lumpur": 0,
+        "Selangor": 0,
+        "Penang": 0,
+        "Johor": 0,
+        "Perak": 0,
+        "Pahang": 0,
+        "Kedah": 0,
+        "Melaka": 0,
+        "Negeri Sembilan": 0,
+        "Kelantan": 0,
+        "Terengganu": 0,
+        "Perlis": 0
+      };
 
       dogs.forEach(d => {
-        if (d.location && stateCounts[d.location] !== undefined) {
-          stateCounts[d.location]++;
+        let loc = d.location;
+        if (loc === 'Joyfido Kennel') {
+          loc = 'Selangor';
+        }
+        if (loc && stateCounts[loc] !== undefined) {
+          stateCounts[loc]++;
         }
       });
 
@@ -1198,7 +1214,7 @@
         document.body.classList.remove('is-admin');
         if (authBtn) authBtn.innerText = 'Login as Admin';
       }
-      renderBreedingPlan(); // Re-render table elements upon auth state change
+      renderBreedingPlan();
     });
 
     window.toggleAuth = function() {
